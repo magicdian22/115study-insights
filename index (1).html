@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 獨立研究反思與強項解析系統</title>
+  
+  <!-- 載入 Tailwind CSS 框架 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 載入 PDF 與圖片生成引擎 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  
+  <!-- 載入 Babel 編譯器 (讓瀏覽器能看懂 React JSX 語法) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- 設定模組引入對應表 -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.284.0?external=react"
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-50">
+  <!-- React 應用的掛載點 -->
+  <div id="root"></div>
+
+  <!-- React 應用程式碼 -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useRef, useEffect } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { Upload, Sparkles, Download, Image as ImageIcon, BookOpen, Target, HeartHandshake, Cpu, Leaf, Lightbulb, PenTool, Radar, ChevronDown, Award, ShieldCheck, Zap, CheckCircle2, Microscope, Image, FileText } from 'lucide-react';
+
+    // --- 客製化 SVG 雷達圖元件 ---
+    const RadarChart = ({ data, colorHex }) => {
+      const size = 200;
+      const center = size / 2;
+      const radius = 60;
+      const levels = 4;
+
+      const getPoint = (value, index, total) => {
+        const angle = (Math.PI * 2 * index) / total - Math.PI / 2;
+        const r = (Math.max(value, 20) / 100) * radius; 
+        return { x: center + r * Math.cos(angle), y: center + r * Math.sin(angle) };
+      };
+
+      const points = data.map((d, i) => getPoint(d.score, i, data.length));
+      const polygonPoints = points.map(p => `${p.x},${p.y}`).join(' ');
+
+      return (
+        <div className="relative flex items-center justify-center w-full h-full p-2">
+          <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`} className="max-w-full max-h-full z-10 relative">
+            {[...Array(levels)].map((_, level) => {
+              const levelRadius = (radius / levels) * (level + 1);
+              const levelPoints = data.map((_, i) => {
+                const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
+                return `${center + levelRadius * Math.cos(angle)},${center + levelRadius * Math.sin(angle)}`;
+              }).join(' ');
+              return <polygon key={level} points={levelPoints} fill="none" stroke="#cbd5e1" strokeWidth="1" />;
+            })}
+            {data.map((_, i) => {
+              const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
+              return (
+                <line key={`line-${i}`} x1={center} y1={center} x2={center + radius * Math.cos(angle)} y2={center + radius * Math.sin(angle)} stroke="#cbd5e1" strokeWidth="1" />
+              );
+            })}
+            <polygon points={polygonPoints} fill={colorHex} fillOpacity="0.5" stroke={colorHex} strokeWidth="2" strokeLinejoin="round" />
+            {points.map((p, i) => (
+              <circle key={`dot-${i}`} cx={p.x} cy={p.y} r="3" fill={colorHex} />
+            ))}
+            {data.map((d, i) => {
+              const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
+              const labelRadius = radius + 22;
+              const x = center + labelRadius * Math.cos(angle);
+              const y = center + labelRadius * Math.sin(angle);
+              let textAnchor = "middle";
+              if (Math.abs(Math.cos(angle)) > 0.1) textAnchor = Math.cos(angle) > 0 ? "start" : "end";
+              return (
+                <text key={`label-${i}`} x={x} y={y + 4} fontSize="10" fontWeight="bold" fill="#334155" textAnchor={textAnchor}>
+                  {d.subject}
+                </text>
+              );
+            })}
+          </svg>
+        </div>
+      );
+    };
+
+    function App() {
+      const [formData, setFormData] = useState({
+        title: '',
+        process: '',
+        conclusion: '',
+        studentReflection: '', 
+        image: null,
+        bannerImage: null, // 新增橫幅背景圖狀態
+      });
+      
+      const [isGenerating, setIsGenerating] = useState(false);
+      const [generatedCard, setGeneratedCard] = useState(null);
+      const [imageLoaded, setImageLoaded] = useState(false);
+      const [isDownloading, setIsDownloading] = useState(false);
+      const fileInputRef = useRef(null);
+
+      // 動態載入 html2canvas 與 jspdf 以支援直接下載圖檔與 PDF
+      useEffect(() => {
+        if (!window.html2canvas) {
+          const script = document.createElement('script');
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+          script.async = true;
+          document.body.appendChild(script);
+        }
+        if (!window.jspdf) {
+          const script = document.createElement('script');
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+          script.async = true;
+          document.body.appendChild(script);
+        }
+      }, []);
+
+      const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFormData((prev) => ({ ...prev, [name]: value }));
+      };
+
+      const handleImageUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          setImageLoaded(false);
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setFormData((prev) => ({ ...prev, image: reader.result }));
+            setImageLoaded(true);
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+
+      // 直接下載 PDF 處理 (利用 jsPDF 引擎)
+      const handleDownloadPDF = async () => {
+        if (!window.html2canvas || !window.jspdf) {
+          alert("PDF 生成引擎仍在載入中，請稍候再試...");
+          return;
+        }
+        
+        setIsDownloading(true);
+        try {
+          const cardElement = document.getElementById('card-preview-area');
+          const canvas = await window.html2canvas(cardElement, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#f1f5f9',
+          });
+          
+          const imgData = canvas.toDataURL('image/jpeg', 0.95);
+          const { jsPDF } = window.jspdf;
+          
+          const pdfWidth = canvas.width / 2; 
+          const pdfHeight = canvas.height / 2;
+          
+          const pdf = new jsPDF({
+            orientation: pdfWidth > pdfHeight ? 'landscape' : 'portrait',
+            unit: 'px',
+            format: [pdfWidth, pdfHeight]
+          });
+          
+          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+          pdf.save(`${formData.title || '獨立研究強項解析卡'}.pdf`);
+        } catch (error) {
+          console.error("生成 PDF 失敗:", error);
+          alert("PDF 生成失敗，請重試。");
+        } finally {
+          setIsDownloading(false);
+        }
+      };
+
+      // JPG 圖片下載處理
+      const handleDownloadJPG = async () => {
+        if (!window.html2canvas) {
+          alert("圖片生成引擎仍在載入中，請稍候再試...");
+          return;
+        }
+        
+        setIsDownloading(true);
+        try {
+          const cardElement = document.getElementById('card-preview-area');
+          const canvas = await window.html2canvas(cardElement, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#f1f5f9',
+          });
+          
+          const link = document.createElement('a');
+          link.download = `${formData.title || '獨立研究強項解析卡'}.jpg`;
+          link.href = canvas.toDataURL('image/jpeg', 0.95);
+          link.click();
+        } catch (error) {
+          console.error("生成圖片失敗:", error);
+          alert("圖片生成失敗，請重試。");
+        } finally {
+          setIsDownloading(false);
+        }
+      };
+
+      // 根據截圖恢復範例選單名稱，並精緻化科學研究數據內容，加入背景橫幅圖案
+      const examples = {
+        iot: {
+          title: '循光引路：物聯網輔助自立照護系統',
+          process: '針對第一類身障者需求，設計「提示-執行-回饋」自動化流程。選用 XIAO ESP32S3 聯網開發板、NFC 感應與 MQTT 通訊協定，並運用 3D 列印優化手環，成功克服硬體功耗與多裝置同步延遲問題。',
+          conclusion: '問卷實測顯示「數據客觀性」達 4.4 分。雲端資料庫精準紀錄時間戳記，系統能有效減輕照護者溝通疲勞(4.1分)，並成功追蹤使用者行為訓練的平均反應時間差。',
+          studentReflection: '雖然 Arduino 程式編寫與 3D 建模微調非常耗時，但當看到系統成功將模糊的照護經驗轉化為客觀的視覺化數據時，我深刻體會到科技能讓社會照護變得更有尊嚴與效率。',
+          image: 'https://images.unsplash.com/photo-1555664424-778a1e5e1b48?auto=format&fit=crop&q=80&w=800', 
+          bannerImage: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=800', // 科技/電路風格背景
+        },
+        fish: {
+          title: '「鱗」機一動：非油炸魚鱗膠原蛋白科學麵',
+          process: '利用高壓熱萃取法提取 1:10 虱目魚鱗膠原蛋白，於室溫「微凝膠狀態」下進行揉製。確立 100g 麵粉添加 45g 萃取液之黃金配方，並自製重力測試模組進行三點彎曲物理量測。',
+          conclusion: '膠原蛋白的物理交聯成功撐起立體氣孔，使麵體斷裂強度降至最佳脆度 90g。精密水分儀檢測其水活性(Aw)穩定控制於 0.6 以下，具備優於市售乾燥麵的天然防腐與抗回潮力。',
+          studentReflection: '從操作 Brix 濃度計到在顯微鏡下看見膠原蛋白網絡撐起氣孔的那一刻，我學會了如何從化學數據中找到提升口感的物理基礎。原來水產廢棄物也能透過嚴謹的實驗轉身為永續食品。',
+          image: 'https://images.unsplash.com/photo-1593504049359-74330189a345?auto=format&fit=crop&q=80&w=800',
+          bannerImage: 'https://images.unsplash.com/photo-1524704654690-b56c05c78a00?auto=format&fit=crop&q=80&w=800', // 水波/鱗片紋理背景
+        },
+        plant: {
+          title: '植物蠟封 OK 繃：天然精油保護膠之研發',
+          process: '針對傳統配方易酸敗痛點，確立「植物油 1：蜂蠟 2：松香 3」之熱力學穩定比例。添加 0.5% 丁香精油，並透過高精度數位推拉力計進行橫向抗剪切力與垂直穿刺硬度之雙軸力學測試。',
+          conclusion: '實驗證實 0.5% 丁香配方於 6 天內達成 100% 絕對抑菌率，將多頭玫瑰切口壞死深度精準控制在 0.1cm 內。全天然配方展現強大物理阻絕與化學防禦力，大幅延長花卉綜合保鮮壽命。',
+          studentReflection: '為了測量 1:2:3 比例的結構穩定度，我們反覆進行垂直硬度與橫向推力測試。這趟研究讓我明白，科學農業不僅是老農經驗的傳承，更是嚴謹數據的量化分析與創新實踐。',
+          image: 'https://images.unsplash.com/photo-1466692476868-aef1dfb1e735?auto=format&fit=crop&q=80&w=800',
+          bannerImage: 'https://images.unsplash.com/photo-1559564484-e48b3e040ff4?auto=format&fit=crop&q=80&w=800', // 粉色玫瑰背景(對應您上傳的橫幅圖案)
+        }
+      };
+
+      const loadExample = (type) => {
+        if (!type) return;
+        setFormData(examples[type]);
+        setImageLoaded(true);
+      };
+
+      const generateReflection = () => {
+        if (!formData.title || !formData.process || !formData.conclusion || !formData.studentReflection) {
+          alert("請填寫所有內容，讓 AI 能完整分析您的特質唷！");
+          return;
+        }
+
+        setIsGenerating(true);
+
+        setTimeout(() => {
+          const { title, process, conclusion, studentReflection, bannerImage } = formData;
+          const combined = (title + process + conclusion + studentReflection).toLowerCase();
+          
+          // 1. 初始化分數 (基礎 55)
+          const scores = { problem: 55, execute: 55, analysis: 55, creative: 55, interpersonal: 50, persistence: 60 };
+          let matchedAbilities = []; 
+
+          // 2. 結論驅動與深度文字掃描 (對標 74 項能力表)
+          if (combined.includes('診斷') || combined.includes('修復') || combined.includes('困難')) {
+            scores.problem += 25; matchedAbilities.push("診斷/修復(01)");
+          }
+          if (combined.includes('組裝') || combined.includes('製作') || combined.includes('手環')) {
+            scores.execute += 15; matchedAbilities.push("組裝/搭建(02)");
+          }
+          if (combined.includes('數據') || combined.includes('%') || combined.includes('aw') || combined.includes('分') || combined.includes('量化')) {
+            scores.analysis += 30; matchedAbilities.push("數與分析(25)");
+          }
+          if (combined.includes('創新') || combined.includes('突破') || combined.includes('自製') || combined.includes('黃金配方')) {
+            scores.creative += 30; matchedAbilities.push("創意轉化產品(56)");
+          }
+          if (combined.includes('照護') || combined.includes('訪談') || combined.includes('溝通') || combined.includes('社會')) {
+            scores.interpersonal += 35; matchedAbilities.push("支持性人際關係(39)");
+          }
+          if (combined.includes('失敗') || combined.includes('反覆') || combined.includes('沮喪')) {
+            scores.persistence += 25; matchedAbilities.push("禁得起失敗(74)");
+          }
+
+          // 3. 根據結論決定卡牌主題與稀有度
+          let themeColor = 'from-indigo-600 to-purple-600';
+          let themeColorHex = '#6366f1';
+          let rarity = 'SSR 卓越級';
+          let achievementTitle = '研究探索者';
+          let mainBadge = { name: '用心投入', icon: <Award size={12}/>, color: 'bg-slate-100 text-slate-700' };
+
+          // 多元主題判斷邏輯
+          if (scores.interpersonal > 75) {
+            themeColor = 'from-rose-500 to-orange-500'; themeColorHex = '#f43f5e';
+            achievementTitle = '社會變革先鋒';
+            mainBadge = { name: '同理關懷', icon: <HeartHandshake size={12}/>, color: 'bg-rose-100 text-rose-700' };
+          } else if (scores.analysis > 80) {
+            themeColor = 'from-cyan-500 to-blue-600'; themeColorHex = '#0ea5e9';
+            achievementTitle = '科研數據導師';
+            mainBadge = { name: '精確剖析', icon: <ShieldCheck size={12}/>, color: 'bg-blue-100 text-blue-700' };
+          } else if (scores.creative > 80) {
+            themeColor = 'from-amber-400 to-yellow-600'; themeColorHex = '#d97706';
+            achievementTitle = '創新技術先驅';
+            mainBadge = { name: '創意突破', icon: <Zap size={12}/>, color: 'bg-amber-100 text-amber-700' };
+          } else if (scores.execute > 70) {
+            themeColor = 'from-emerald-500 to-teal-600'; themeColorHex = '#10b981';
+            achievementTitle = '永續實踐家';
+            mainBadge = { name: '診斷解決', icon: <Microscope size={12}/>, color: 'bg-emerald-100 text-emerald-700' };
+          }
+
+          const radarData = [
+            { subject: '問題解決', score: Math.min(scores.problem, 100) },
+            { subject: '執行完成', score: Math.min(scores.execute, 100) },
+            { subject: '數與分析', score: Math.min(scores.analysis, 100) },
+            { subject: '創意發明', score: Math.min(scores.creative, 100) },
+            { subject: '人際溝通', score: Math.min(scores.interpersonal, 100) },
+            { subject: '勤奮動機', score: Math.min(scores.persistence, 100) },
+          ];
+
+          // 增強對標 74 項能力的解讀文本 (綜合回應：過程、結論、反思)
+          const targetAbility = matchedAbilities.length > 0 ? matchedAbilities[0] : '積極進取(68)';
+          
+          // 根據分數動態調整特質讚美詞
+          let traitFocus = '嚴謹的邏輯思考';
+          if (scores.persistence > 75) traitFocus = '百折不撓的韌性';
+          else if (scores.creative > 75) traitFocus = '突破框架的創新思維';
+          else if (scores.interpersonal > 75) traitFocus = '深度的社會同理心';
+          
+          // 擷取各欄位精華片段以融入評語
+          const pSnippet = process.length > 12 ? process.slice(0, 12) + '...' : process;
+          const cSnippet = conclusion.length > 12 ? conclusion.slice(0, 12) + '...' : conclusion;
+          const rSnippet = studentReflection.length > 12 ? studentReflection.slice(0, 12) + '...' : studentReflection;
+
+          const aiText = `在克服「${pSnippet}」等過程挑戰時，您展現了${traitFocus}。您的結論「${cSnippet}」印證了您卓越的【${achievementTitle}】潛力。從反思「${rSnippet}」中，AI 深度對標了能力表中的「${targetAbility}」指標，這是一份兼具學術與自我成長的珍貴歷程！`;
+
+          setGeneratedCard({
+            title, image: formData.image, bannerImage: formData.bannerImage, traits: [mainBadge, { name: '持續累積', icon: <Target size={12}/>, color: 'bg-slate-50 text-slate-500' }],
+            process, conclusion, studentReflection, reflection: aiText, themeColor, themeColorHex, radarData, rarity, achievementTitle
+          });
+          
+          setIsGenerating(false);
+        }, 1500);
+      };
+
+      return (
+        <div className="min-h-screen text-slate-800 font-sans p-4 md:p-8">
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              #card-preview-area, #card-preview-area * { visibility: visible; }
+              #card-preview-area { 
+                position: absolute; 
+                left: 50%; 
+                top: 50%; 
+                transform: translate(-50%, -50%);
+                width: 100%; 
+                max-width: 440px; 
+                margin: 0; 
+              }
+              * { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
+            }
+          `}</style>
+
+          <header className="max-w-6xl mx-auto mb-10 text-center">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-50/80 text-indigo-600 text-[13px] font-bold mb-4 border border-indigo-100 shadow-sm backdrop-blur-sm">
+              <Sparkles size={14} className="text-indigo-500" />
+              <span>高雄市大同國小資優班 × 學習歷程 × 74項能力指標</span>
+            </div>
+            <h1 className="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-700 via-purple-600 to-pink-500 flex items-center justify-center gap-3 mb-4 tracking-wide">
+              AI 獨立研究反思與強項解析系統
+            </h1>
+            <p className="text-slate-500 font-medium tracking-tight text-sm">
+              將你的研究心血與反思，淬鍊為獨一無二的專屬特質認證卡牌
+            </p>
+          </header>
+
+          <main className="max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-8">
+            
+            {/* 左側：輸入表單 */}
+            <section className="bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-slate-100 flex flex-col h-full">
+              <div>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
+                  <h2 className="text-xl font-bold text-slate-700 flex items-center gap-2">
+                    <PenTool size={20} className="text-indigo-500"/>
+                    研究歷程輸入
+                  </h2>
+                  <div className="relative w-full sm:w-auto">
+                    <select 
+                      onChange={(e) => loadExample(e.target.value)}
+                      className="w-full sm:w-auto appearance-none pl-3 pr-8 py-1.5 bg-slate-100 text-slate-600 text-sm font-bold rounded-full hover:bg-slate-200 transition focus:outline-none cursor-pointer border-none shadow-sm"
+                    >
+                      <option value="">載入範例...</option>
+                      <option value="iot">循光引路 (社會照護/IoT)</option>
+                      <option value="fish">鱗機一動 (食品科技/循環經濟)</option>
+                      <option value="plant">植物蠟封 (農業科學/生物材料)</option>
+                    </select>
+                    <ChevronDown size={14} className="absolute right-3 top-2.5 text-slate-400 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1.5">專題名稱</label>
+                    <input type="text" name="title" value={formData.title} onChange={handleInputChange} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 transition shadow-sm" placeholder="輸入專題標題..." />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-1.5">研究過程與挑戰</label>
+                      <textarea name="process" value={formData.process} onChange={handleInputChange} rows={4} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 transition resize-none text-sm leading-relaxed" placeholder="描述實驗步驟與面臨的困難..." />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-1.5">核心研究結論</label>
+                      <textarea name="conclusion" value={formData.conclusion} onChange={handleInputChange} rows={4} className="w-full px-4 py-2 bg-indigo-50/30 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 transition resize-none text-sm font-medium leading-relaxed" placeholder="您的研究發現了什麼？" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                      <Lightbulb size={16} className="text-amber-500"/> 自我反思與學習心得
+                    </label>
+                    <textarea name="studentReflection" value={formData.studentReflection} onChange={handleInputChange} rows={3} className="w-full px-4 py-2 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 transition resize-none text-sm leading-relaxed" placeholder="寫下在這個過程中的個人體悟..." />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1.5">成果照片上傳</label>
+                    <div 
+                      className={`w-full h-20 border-2 border-dashed rounded-lg flex items-center p-2 cursor-pointer transition-all ${imageLoaded ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'}`} 
+                      onClick={() => fileInputRef.current.click()}
+                    >
+                      <div className="flex items-center gap-3 w-full">
+                        {formData.image ? (
+                          <div className="relative w-12 h-12 rounded border border-white shadow-sm overflow-hidden flex-shrink-0">
+                            <img src={formData.image} alt="Preview" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center text-slate-400 flex-shrink-0">
+                            <ImageIcon size={20} />
+                          </div>
+                        )}
+                        <div className="flex flex-col flex-grow">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-bold ${imageLoaded ? 'text-emerald-700' : 'text-slate-500'}`}>
+                              {imageLoaded ? '照片已成功確認上傳' : '點擊上傳專題照片'}
+                            </span>
+                            {imageLoaded && <CheckCircle2 size={16} className="text-emerald-600 animate-bounce" />}
+                          </div>
+                          <span className="text-[10px] text-slate-400">支援 JPG、PNG 格式</span>
+                        </div>
+                        {!imageLoaded && <Upload size={18} className="text-slate-400 mr-2" />}
+                      </div>
+                      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button 
+                onClick={generateReflection} 
+                disabled={isGenerating} 
+                className={`w-full mt-6 text-white font-bold py-3 px-4 rounded-xl shadow-lg transform transition active:scale-[0.98] flex justify-center items-center gap-2 ${!imageLoaded ? 'bg-slate-400 cursor-not-allowed opacity-80' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700'}`}
+              >
+                {isGenerating ? (
+                  <><Sparkles className="animate-spin" size={20} /> AI 正根據結論建模中...</>
+                ) : (
+                  <>{!imageLoaded ? <ImageIcon size={20}/> : <Radar size={20} />} {!imageLoaded ? '請先上傳成果照片' : '生成解析典藏卡'}</>
+                )}
+              </button>
+            </section>
+
+            {/* 右側：卡牌預覽 */}
+            <section className="bg-slate-100 rounded-2xl p-6 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 relative overflow-hidden h-full">
+              {!generatedCard ? (
+                <div className="text-center text-slate-400 flex flex-col items-center my-auto">
+                  <div className="w-20 h-32 border-2 border-slate-300 rounded-lg mb-4 flex items-center justify-center opacity-50"><Radar size={32} /></div>
+                  <p className="font-bold leading-relaxed">請在左側填寫研究內容並上傳照片，<br/>AI 將依據結論生成獨一無二的強項解析卡。</p>
+                </div>
+              ) : (
+                <div className="w-full flex flex-col items-center animate-fade-in my-auto pb-2">
+                  <div id="card-preview-area" className="w-full max-w-[420px] bg-slate-100 p-2 rounded-2xl">
+                    <div className={`p-1.5 rounded-2xl bg-gradient-to-br ${generatedCard.themeColor} shadow-2xl relative group overflow-hidden`}>
+                      <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none z-0"></div>
+                      
+                      {/* 加入半透明的橫幅背景圖案 */}
+                      <div className="bg-white/95 rounded-xl overflow-hidden shadow-inner flex flex-col relative z-10 backdrop-blur-md">
+                        
+                        {generatedCard.bannerImage && (
+                          <div 
+                            className="absolute inset-0 z-0 opacity-[0.12] pointer-events-none mix-blend-luminosity"
+                            style={{ 
+                              backgroundImage: `url(${generatedCard.bannerImage})`, 
+                              backgroundSize: 'cover', 
+                              backgroundPosition: 'center',
+                              backgroundRepeat: 'no-repeat'
+                            }}
+                          />
+                        )}
+
+                        <div className="relative z-10 flex flex-col h-full">
+                          {/* Header */}
+                          <div className="px-4 py-3 border-b border-slate-200/50 flex justify-between items-center bg-slate-50/60">
+                            <div className="flex flex-col flex-1 pr-3">
+                              <span className="text-[9px] text-slate-500 font-bold mb-0.5 tracking-wider">高雄市大同國小資優班</span>
+                              <h3 className="font-bold text-[15px] text-slate-800 leading-snug break-words">{generatedCard.title}</h3>
+                              <span className="text-[10px] text-indigo-600 font-black tracking-wider uppercase mt-0.5">{generatedCard.achievementTitle}</span>
+                            </div>
+                            <div className={`shrink-0 px-2.5 py-1 rounded text-[10px] font-black bg-gradient-to-r ${generatedCard.themeColor} text-white shadow-md`}>{generatedCard.rarity}</div>
+                          </div>
+
+                          {/* Image & Radar (核心雷達圖展示區) */}
+                          <div className="grid grid-cols-2 bg-slate-100/60 p-3 gap-3 border-b border-slate-200/50">
+                            <div className="w-full aspect-square rounded-lg overflow-hidden border-2 border-white shadow-sm bg-white">
+                              <img src={generatedCard.image} alt="Preview" className="w-full h-full object-cover relative z-10" />
+                            </div>
+                            <div className="w-full aspect-square bg-white/80 backdrop-blur-sm rounded-lg border-2 border-white shadow-sm flex flex-col items-center justify-center relative pb-1 pt-4">
+                              <p className="text-[8px] font-black text-slate-500 absolute top-1.5 left-2 uppercase tracking-tighter flex items-center gap-1 opacity-80 z-20">
+                                <Microscope size={8}/> Strength Profile
+                              </p>
+                              <RadarChart data={generatedCard.radarData} colorHex={generatedCard.themeColorHex} />
+                            </div>
+                          </div>
+
+                          {/* 特質徽章 (動態生成) */}
+                          <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
+                            {generatedCard.traits.map((trait, index) => (
+                              <div key={index} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-bold shadow-sm border border-white/50 backdrop-blur-sm ${trait.color}`}>
+                                {trait.icon} {trait.name}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* 歷程與結論摘要區 */}
+                          <div className="px-4 pt-1">
+                            <div className="bg-slate-50/70 backdrop-blur-sm rounded-lg p-2.5 border border-white/50 flex flex-col gap-2 shadow-sm">
+                              <div>
+                                <p className="text-[9px] font-bold text-slate-500 mb-0.5 flex items-center gap-1">
+                                  <PenTool size={10}/> 研究過程與挑戰
+                                </p>
+                                <p className="text-[10px] text-slate-700 leading-snug">{generatedCard.process}</p>
+                              </div>
+                              <div className="border-t border-slate-200/50 pt-1.5">
+                                <p className="text-[9px] font-bold text-indigo-500 mb-0.5 flex items-center gap-1">
+                                  <Target size={10}/> 核心研究結論
+                                </p>
+                                <p className="text-[10px] text-slate-800 leading-snug font-bold italic">「{generatedCard.conclusion}」</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 學生反思 & AI 深度解讀 */}
+                          <div className="px-4 py-3 flex-grow flex flex-col gap-3">
+                            <div>
+                              <p className="text-[10px] font-bold text-amber-600 mb-1 flex items-center gap-1">
+                                <Lightbulb size={12}/> 自我反思與學習心得
+                              </p>
+                              <p className="text-[11px] text-slate-800 leading-relaxed font-bold border-l-3 border-amber-400 pl-2">
+                                {generatedCard.studentReflection}
+                              </p>
+                            </div>
+
+                            <div className="bg-gradient-to-r from-indigo-50/90 to-purple-50/90 backdrop-blur-md p-3 rounded-lg border border-white/60 relative overflow-hidden shadow-sm">
+                              <div className="absolute top-0 right-0 p-1 opacity-20"><Sparkles size={32} className="text-indigo-400"/></div>
+                              <p className="text-[10px] font-bold text-indigo-700 mb-1.5 flex items-center gap-1">
+                                <Microscope size={12}/> AI 深度特質解析 (對標 74 項指標)
+                              </p>
+                              <p className="text-[10.5px] text-slate-800 leading-relaxed font-medium">"{generatedCard.reflection}"</p>
+                            </div>
+                          </div>
+
+                          {/* Footer */}
+                          <div className="px-4 py-2 bg-slate-800/95 backdrop-blur-md text-slate-300 text-[8px] flex justify-between items-center font-bold tracking-widest mt-auto">
+                            <span className="opacity-80 uppercase tracking-tighter">Powered by AI Strength Analysis V4.5</span>
+                            <span className="text-white bg-white/10 px-2 py-0.5 rounded">強項解析典藏卡</span>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 雙軌輸出功能區塊：PDF 與 JPG */}
+                  <div className="mt-6 flex flex-col sm:flex-row gap-3 w-full max-w-[420px]">
+                    <button 
+                      onClick={handleDownloadPDF} 
+                      disabled={isDownloading}
+                      className="flex-1 bg-white border border-slate-200 text-slate-700 py-2.5 rounded-xl font-bold shadow-md hover:bg-slate-50 hover:border-slate-300 transition flex justify-center items-center gap-2 disabled:opacity-70"
+                    >
+                      {isDownloading ? <Sparkles className="animate-spin" size={18} /> : <FileText size={18} className="text-rose-500" />} 
+                      {isDownloading ? '處理中...' : '下載為 PDF 檔'}
+                    </button>
+                    <button 
+                      onClick={handleDownloadJPG} 
+                      disabled={isDownloading}
+                      className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-2.5 rounded-xl font-bold shadow-md hover:from-indigo-700 hover:to-purple-700 transition flex justify-center items-center gap-2 disabled:opacity-70"
+                    >
+                      {isDownloading ? <Sparkles className="animate-spin" size={18} /> : <Image size={18} />} 
+                      {isDownloading ? '處理中...' : '下載為 JPG 檔'}
+                    </button>
+                  </div>
+
+                </div>
+              )}
+            </section>
+          </main>
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
