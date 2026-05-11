@@ -38,7 +38,8 @@
 
     // --- 客製化 SVG 雷達圖元件 ---
     const RadarChart = ({ data, colorHex }) => {
-      const size = 200;
+      // 放大畫布 size 並維持 radius，讓周圍留出足夠的文字顯示空間，避免手機版切字
+      const size = 280;
       const center = size / 2;
       const radius = 60;
       const levels = 4;
@@ -54,7 +55,7 @@
 
       return (
         <div className="relative flex items-center justify-center w-full h-full p-2">
-          <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`} className="max-w-full max-h-full z-10 relative">
+          <svg width="100%" height="100%" viewBox={`0 0 ${size} ${size}`} className="max-w-full max-h-full z-10 relative overflow-visible">
             {[...Array(levels)].map((_, level) => {
               const levelRadius = (radius / levels) * (level + 1);
               const levelPoints = data.map((_, i) => {
@@ -75,13 +76,13 @@
             ))}
             {data.map((d, i) => {
               const angle = (Math.PI * 2 * i) / data.length - Math.PI / 2;
-              const labelRadius = radius + 22;
+              const labelRadius = radius + 25; // 適度拉開標籤距離
               const x = center + labelRadius * Math.cos(angle);
               const y = center + labelRadius * Math.sin(angle);
               let textAnchor = "middle";
               if (Math.abs(Math.cos(angle)) > 0.1) textAnchor = Math.cos(angle) > 0 ? "start" : "end";
               return (
-                <text key={`label-${i}`} x={x} y={y + 4} fontSize="10" fontWeight="bold" fill="#334155" textAnchor={textAnchor}>
+                <text key={`label-${i}`} x={x} y={y + 4} fontSize="12" fontWeight="bold" fill="#334155" textAnchor={textAnchor}>
                   {d.subject}
                 </text>
               );
