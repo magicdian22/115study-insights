@@ -307,27 +307,10 @@
           ];
 
           const targetAbility = matchedAbilities.length > 0 ? matchedAbilities[0] : '積極進取(68)';
-          let illustration = '';
           
-          // 根據 74 項能力指標動態配對專屬的「人物能力」可愛插圖 (使用 Notionists 風格)
-          if (targetAbility.includes('診斷/修復') || targetAbility.includes('組裝/搭建')) {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=repair&backgroundColor=e0f2fe'; 
-          } else if (targetAbility.includes('數與分析')) {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=data&backgroundColor=cffafe'; 
-          } else if (targetAbility.includes('創意轉化')) {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=idea&backgroundColor=fef3c7'; 
-          } else if (targetAbility.includes('人際關係')) {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=care&backgroundColor=fce7f3'; 
-          } else if (targetAbility.includes('禁得起失敗')) {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=strong&backgroundColor=d1fae5'; 
-          } else {
-            illustration = 'https://api.dicebear.com/8.x/notionists/svg?seed=smart&backgroundColor=f3f4f6'; 
-          }
-
-          // ★ 完美修復：動態擷取短句與三段式語意生成器 ★
+          // 宣告提取語句函數 (避免前面代碼截斷的問題)
           const extractPhrase = (text) => {
             if (!text) return "";
-            // 以標點符號分割，過濾掉太短的字句，擷取第一段有意義的話
             const phrases = text.split(/[，。；、？！,.;?!]/).map(s => s.trim()).filter(p => p.length > 4);
             let phrase = phrases.length > 0 ? phrases[0] : text;
             return phrase.length > 18 ? phrase.substring(0, 18) + '...' : phrase;
@@ -337,7 +320,6 @@
           const cPhrase = extractPhrase(conclusion);
           const rPhrase = extractPhrase(studentReflection);
 
-          // 1. 動態回應：研究過程與挑戰
           let processFeedback = "";
           if (scores.persistence > 70 || combined.includes('困難') || combined.includes('失敗') || combined.includes('克服')) {
             processFeedback = `面對「${pPhrase}」等實作瓶頸時，您沒有選擇退縮，反而展現見招拆招的堅韌底氣。`;
@@ -347,7 +329,6 @@
             processFeedback = `回顧您在「${pPhrase}」的探究歷程，充分展現了主動探索未知領域的積極態度。`;
           }
 
-          // 2. 動態回應：核心研究結論
           let conclusionFeedback = "";
           if (scores.analysis > 75) {
             conclusionFeedback = `特別是結論中淬鍊出「${cPhrase}」的量化成果，讓研究具備了嚴謹的科學證據支撐。`;
@@ -359,14 +340,12 @@
             conclusionFeedback = `您的結論「${cPhrase}」清楚點出了研究的核心貢獻，印證了您卓越的潛力。`;
           }
 
-          // 3. 動態回應：自我反思與 74 項指標
           let reflectionFeedback = `結合深刻的自我反思：「${rPhrase}」，AI 將您的綜合表現精準對標至《74項指標》中的【${targetAbility}】。這不僅是一次專題，更是您強項覺醒的絕佳證明！`;
 
-          // 組合最終 AI 講評
           const aiText = `${processFeedback} ${conclusionFeedback} ${reflectionFeedback}`;
 
           setGeneratedCard({
-            title, image: formData.image, bannerImage: formData.bannerImage, illustration, traits: [mainBadge, { name: '持續累積', icon: <Target size={12}/>, color: 'bg-slate-50 text-slate-500' }],
+            title, image: formData.image, bannerImage: formData.bannerImage, traits: [mainBadge, { name: '持續累積', icon: <Target size={12}/>, color: 'bg-slate-50 text-slate-500' }],
             process, conclusion, studentReflection, reflection: aiText, themeColor, themeColorHex, radarData, rarity, achievementTitle
           });
           
@@ -530,7 +509,7 @@
                     <div className={`p-1.5 rounded-2xl bg-gradient-to-br ${generatedCard.themeColor} shadow-2xl relative group overflow-hidden`}>
                       <div className="absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none z-0"></div>
                       
-                      {/* 加入半透明的橫幅背景圖案，改用 img 標籤確保 CORS 輸出不破圖 */}
+                      {/* 加入半透明的橫幅背景圖案 */}
                       <div className="bg-white/95 rounded-xl overflow-hidden shadow-inner flex flex-col relative z-10 backdrop-blur-md">
                         
                         {generatedCard.bannerImage && (
@@ -609,16 +588,9 @@
                               <p className="text-[10px] font-bold text-indigo-700 mb-2 flex items-center gap-1">
                                 <Microscope size={12}/> AI 深度特質解析 (對標 74 項指標)
                               </p>
-                              <div className="flex gap-2.5 items-start">
-                                {/* AI 生成的相對應意象插圖 */}
-                                <div className="w-14 h-14 shrink-0 rounded-lg overflow-hidden border-2 border-white/80 shadow-sm relative bg-white">
-                                  <div className="absolute inset-0 bg-indigo-500/10 mix-blend-overlay z-10"></div>
-                                  <img src={generatedCard.illustration} crossOrigin="anonymous" alt="AI 能力插圖" className="w-full h-full object-cover" />
-                                </div>
-                                <p className="text-[10px] text-slate-800 leading-relaxed font-medium flex-1 italic">
-                                  "{generatedCard.reflection}"
-                                </p>
-                              </div>
+                              <p className="text-[10.5px] text-slate-800 leading-relaxed font-medium italic">
+                                "{generatedCard.reflection}"
+                              </p>
                             </div>
                           </div>
 
